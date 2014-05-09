@@ -3,6 +3,7 @@ import numpy
 from subprocess import *
 from math import *
 import time
+#starting with git, looks cool
 numworkers=int(raw_input('How many workers? '))
 networkingspeed=float(raw_input('Networking speed? '))
 size=int(raw_input('How large of an area? '))
