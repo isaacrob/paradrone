@@ -1,0 +1,168 @@
+from IPython.parallel import *
+import os, sys
+
+#this will be just like the Celery version
+#but will use IPython instead
+#make sure the engines are running
+#perhaps modify later to start engines automatically
+#with #!/bin/sh and then later python
+
+#start the controller and view
+progo=raw_input('Profile? ')
+c=Client(profile=progo)
+dview=c[:]
+dview.block=False
+
+#import on engines
+with dview.sync_imports():
+	import numpy
+	from math import sqrt, ceil
+	import time
+
+#get the user input about the area and num workers (MUST EQUAL NUM ENGINES)
+#numworkers=int(raw_input('How many workers? '))
+numworkers=len(c.ids)
+size=int(raw_input('How large of an area? '))
+clearprompt=raw_input('Clear the screen? y/n ')
+
+#define organizational means and variables
+def genmyspotlist(myspot):
+	myspot=list(myspot)
+	myspotlist=[None]*8
+	myspotlist[0]=(myspot[0]-1,myspot[1]-1)
+	myspotlist[1]=(myspot[0],myspot[1]-1)
+	myspotlist[2]=(myspot[0]+1,myspot[1]-1)
+	myspotlist[3]=(myspot[0]-1,myspot[1])
+	myspotlist[4]=(myspot[0]+1,myspot[1])
+	myspotlist[5]=(myspot[0]-1,myspot[1]+1)
+	myspotlist[6]=(myspot[0],myspot[1]+1)
+	myspotlist[7]=(myspot[0]+1,myspot[1]+1)
+	return myspotlist
+dview['genmyspotlist']=genmyspotlist
+def nearestzero(myspot,map):
+	myspotlist=genmyspotlist(myspot)
+	listofbadspots=[]
+	for i in range(0,8):
+		if len(map) in myspotlist[i] or -1 in myspotlist[i]:
+			listofbadspots.append(myspotlist[i])
+	for i in listofbadspots:
+		myspotlist.remove(i)
+	x,y=numpy.where(map==0)
+	zerospots=zip(x,y)
+	if len(zerospots)==0:
+		print 'could not find any zeros, will stay put'
+		return myspot
+	zerodists=[None]*len(zerospots)
+	for i in range(0,len(zerospots)):
+		zerodists[i]=sqrt((myspot[0]-zerospots[i][0])**2+(myspot[1]-\
+		       zerospots[i][1])**2)
+	closestzero=zerospots[zerodists.index(min(zerodists))]
+	distlist=[None]*len(myspotlist)
+	for i in range(0,len(myspotlist)):
+		distlist[i]=sqrt((closestzero[0]-myspotlist[i][0])**2+\
+		         (closestzero[1]-myspotlist[i][1])**2)
+	return tuple(myspotlist[distlist.index(min(distlist))])
+dview['nearestzero']=nearestzero
+background=numpy.zeros((size,size))
+spots=[None]*numworkers
+def updatemap():
+	for spot in spots:
+		background[spot[0],spot[1]]=background[spot[0],spot[1]]+1;
+
+#define different search methods and push to engines
+def getnextspot(center,myspot,map,nope=False):
+	if type(myspot[0])==tuple:
+		myspot=myspot[0]
+	oktogo=0
+	repeats=0
+	myspotlist=genmyspotlist(myspot)
+	if nope:
+		myspotlist.remove(nope)
+	listofbadspots=[]
+	for i in range(0,len(myspotlist)):
+		if len(map) in myspotlist[i] or -1 in myspotlist[i] or map[\
+		             myspotlist[i][0],myspotlist[i][1]]!=0:
+			listofbadspots.append(myspotlist[i])
+	for i in listofbadspots:
+		myspotlist.remove(i)
+	if len(myspotlist)==0:
+		return nearestzero(myspot,map)
+	distlist=[None]*len(myspotlist)
+	for i in range(0,len(distlist)):
+		distlist[i]=sqrt((center[0]-myspotlist[i][0])**2+(center[1]-\
+		            myspotlist[i][1])**2)
+	return tuple(myspotlist[distlist.index(max(distlist))])
+dview['getnextspot']=getnextspot
+#add more algorithms later, although not too important
+
+#initialize and prepare map with workers
+for i in range(numworkers):
+	intermidspot=(int(numpy.random.rand()*size),\
+	            int(numpy.random.rand()*size))
+	while intermidspot in spots:
+		intermidspot=(int(numpy.random.rand()*size),\
+		        int(numpy.random.rand()*size))
+	spots[i]=intermidspot
+	print 'worker at '+str(intermidspot)
+	background[intermidspot[0],intermidspot[1]]=1
+oldspots=[]
+oldspots.append(tuple(spots))
+iteration=1
+#crashtest=0
+
+#begin the search
+#starttime=time.asctime()
+if clearprompt=='y':
+	os.system('clear')
+print 'starting the search'
+print 'iteration '+str(iteration)
+print background
+
+#update the map and have the engines explore
+#this uses localized spots as opposed to RabbitMQ implementation
+#make this execution more pretty
+while 0 in background:
+	dview=c[:]
+	if iteration==1:
+		print 'starting at '+str(spots)
+	else:
+		print str(oldspots[iteration-2])+' >>> '+str(spots)
+	center=[None,None]
+	center[0]=sum([x for x,y in spots])/len(spots)
+	center[1]=sum([y for x,y in spots])/len(spots)
+	starttime=time.time()
+	dview.scatter('myspot',spots)
+	dview['center']=center
+	dview['map']=background
+	dview.execute('newspot=getnextspot(center,myspot,map)')
+	for i in c.ids: #or use dview.gather, but duplicates
+		if not c[i]['newspot'] in spots:
+			spots[c.ids.index(i)]=c[i]['newspot']
+		else:
+			#print 'possible problem with '+str(i)
+			#if crashtest==3:
+			#	sys.exit('drone '+str(i)+' stalled')
+			c[i].execute('newspot=getnextspot(center,myspot,map,newspot)')
+			spots[c.ids.index(i)]=c[i]['newspot']
+			#if spots[i]==oldspots[iteration-1][i]:
+			#	crashtest=crashtest+1
+	updatemap()
+	oldspots.append(tuple(spots))
+	iteration=iteration+1
+	if clearprompt=='y':
+		os.system('clear')
+	print 'iteration '+str(iteration)
+	print background
+	print 'percent done: '+str(float((background>0).sum())/(size**2)*100)+'%'
+	
+#once done, print the final report
+print 'final report: '
+print 'moves wasted: '+str(-size**2+numworkers*iteration-(size**2)\
+                %numworkers)
+print 'workers: '+str(numworkers)
+print 'number of squares: '+str(size**2)
+print 'extra iterations: '+str(iteration-ceil(size**2/numworkers))
+print 'percent error in terms of iterations: '+str((iteration-\
+                ceil(size**2/numworkers\
+                ))/iteration*100)+'%'
+#print 'start time: '+starttime+', end time: '+time.asctime()

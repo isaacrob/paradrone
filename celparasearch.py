@@ -8,6 +8,7 @@ numworkers=int(raw_input('How many workers? '))
 networkingspeed=float(raw_input('Networking speed? '))
 size=int(raw_input('How large of an area? '))
 algorithm=raw_input('Which algorithm? ')
+presets=int(raw_input('How many presets? '))
 def genmyspotlist(myspot):
 	myspotlist=[None]*8
 	myspotlist[0]=(myspot[0]-1,myspot[1]-1)
@@ -20,6 +21,8 @@ def genmyspotlist(myspot):
 	myspotlist[7]=(myspot[0]+1,myspot[1]+1)
 	return myspotlist
 background=numpy.zeros((size,size))
+for i in range(0,presets):
+	background[floor(numpy.random.rand()*size)][floor(numpy.random.rand()*size)]=1
 for i in range(0,numworkers):
 	#Popen(['/Users/isaac/Code/celparaworker.py'])
 	print 'initialized worker '+str(i+1)

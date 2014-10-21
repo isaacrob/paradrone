@@ -1,0 +1,356 @@
+import click
+from IPython.parallel import *
+import os, sys
+
+@click.command()
+@click.option('--profile',default='mactopicluster',help='ipython profile name')
+@click.option('--algorithm',default='edge',help='search algorithm edge/center')
+@click.option('--clearprompt',default='n',help='clear the screen or not y/n')
+@click.option('--gen',default='bishop',help='organizaitonal method')
+@click.argument('size')
+def parasearch(profile,algorithm,clearprompt,gen,size):
+	#like ipparasearch, but start from a clustered position
+	#this one is command-line accessable
+	#use center-seeking and/or edge-seeking algorithm
+	profile=profile
+	algorithm=algorithm
+	clearprompt=clearprompt
+	gen=gen
+	size=size
+
+	#start the controller and view
+	c=Client(profile=profile)
+	dview=c[:]
+	dview.block=False
+
+	#import on engines
+	with dview.sync_imports():
+		import numpy
+		from math import sqrt, ceil
+		import time
+	#	import dill
+	#	from types import FunctionType
+	#	from IPython.utils.pickleutil import can_map
+	#	import pickle
+	#	from IPython.kernel.zmq import serialize
+	#can_map.pop(FunctionType, None)
+	#serialize.pickle = pickle
+
+	numworkers=len(c.ids)
+	algorithm=algorithm+"seek"
+	bishopdic=[0,2,5,7,1,3,4,6]
+	rookdic=[0,1,2,3,4,5,6,7]
+	dicname=gen+"dic"
+
+	#define organizational means and variables
+	if gen=='bishop':
+		def genmyspotlist(myspot): #bishop bias (for central use only)
+			myspot=list(myspot)
+			myspotlist=[None]*8
+			myspotlist[0]=(myspot[0]-1,myspot[1]-1)
+			myspotlist[4]=(myspot[0],myspot[1]-1)
+			myspotlist[1]=(myspot[0]+1,myspot[1]-1)
+			myspotlist[5]=(myspot[0]-1,myspot[1])
+			myspotlist[6]=(myspot[0]+1,myspot[1])
+			myspotlist[2]=(myspot[0]-1,myspot[1]+1)
+			myspotlist[7]=(myspot[0],myspot[1]+1)
+			myspotlist[3]=(myspot[0]+1,myspot[1]+1)
+			return myspotlist
+	elif gen=='rook':
+		def genmyspotlist(myspot): #rook bias (for central use only)
+			myspot=list(myspot)
+			myspotlist=[None]*8
+			myspotlist[4]=(myspot[0]-1,myspot[1]-1)
+			myspotlist[0]=(myspot[0],myspot[1]-1)
+			myspotlist[5]=(myspot[0]+1,myspot[1]-1)
+			myspotlist[1]=(myspot[0]-1,myspot[1])
+			myspotlist[2]=(myspot[0]+1,myspot[1])
+			myspotlist[6]=(myspot[0]-1,myspot[1]+1)
+			myspotlist[3]=(myspot[0],myspot[1]+1)
+			myspotlist[7]=(myspot[0]+1,myspot[1]+1)
+			return myspotlist
+	else:
+		def genmyspotlist(myspot): #basic bias (for central use only)
+			myspot=list(myspot)
+			myspotlist=[None]*8
+			myspotlist[0]=(myspot[0]-1,myspot[1]-1)
+			myspotlist[1]=(myspot[0],myspot[1]-1)
+			myspotlist[2]=(myspot[0]+1,myspot[1]-1)
+			myspotlist[3]=(myspot[0]-1,myspot[1])
+			myspotlist[4]=(myspot[0]+1,myspot[1])
+			myspotlist[5]=(myspot[0]-1,myspot[1]+1)
+			myspotlist[6]=(myspot[0],myspot[1]+1)
+			myspotlist[7]=(myspot[0]+1,myspot[1]+1)
+			return myspotlist
+	def genmyspotlist0(myspot): #-1-1 biased. need to bias according to start
+		myspot=list(myspot)
+		myspotlist=[None]*8
+		myspotlist[0]=(myspot[0]-1,myspot[1]-1)
+		myspotlist[1]=(myspot[0],myspot[1]-1)
+		myspotlist[3]=(myspot[0]+1,myspot[1]-1)
+		myspotlist[2]=(myspot[0]-1,myspot[1])
+		myspotlist[5]=(myspot[0]+1,myspot[1])
+		myspotlist[4]=(myspot[0]-1,myspot[1]+1)
+		myspotlist[6]=(myspot[0],myspot[1]+1)
+		myspotlist[7]=(myspot[0]+1,myspot[1]+1)
+		return myspotlist
+	def genmyspotlist7(myspot): #+1+1 biased. need to bias according to start
+		myspot=list(myspot)
+		myspotlist=[None]*8
+		myspotlist[7]=(myspot[0]-1,myspot[1]-1)
+		myspotlist[6]=(myspot[0],myspot[1]-1)
+		myspotlist[4]=(myspot[0]+1,myspot[1]-1)
+		myspotlist[5]=(myspot[0]-1,myspot[1])
+		myspotlist[2]=(myspot[0]+1,myspot[1])
+		myspotlist[3]=(myspot[0]-1,myspot[1]+1)
+		myspotlist[1]=(myspot[0],myspot[1]+1)
+		myspotlist[0]=(myspot[0]+1,myspot[1]+1)
+		return myspotlist
+	def genmyspotlist5(myspot): #-1+1 biased. need to bias according to start
+		myspot=list(myspot)
+		myspotlist=[None]*8
+		myspotlist[3]=(myspot[0]-1,myspot[1]-1)
+		myspotlist[5]=(myspot[0],myspot[1]-1)
+		myspotlist[7]=(myspot[0]+1,myspot[1]-1)
+		myspotlist[2]=(myspot[0]-1,myspot[1])
+		myspotlist[6]=(myspot[0]+1,myspot[1])
+		myspotlist[0]=(myspot[0]-1,myspot[1]+1)
+		myspotlist[1]=(myspot[0],myspot[1]+1)
+		myspotlist[4]=(myspot[0]+1,myspot[1]+1)
+		return myspotlist
+	def genmyspotlist2(myspot): #+1-1 biased. need to bias according to start
+		myspot=list(myspot)
+		myspotlist=[None]*8
+		myspotlist[4]=(myspot[0]-1,myspot[1]-1)
+		myspotlist[1]=(myspot[0],myspot[1]-1)
+		myspotlist[0]=(myspot[0]+1,myspot[1]-1)
+		myspotlist[6]=(myspot[0]-1,myspot[1])
+		myspotlist[2]=(myspot[0]+1,myspot[1])
+		myspotlist[7]=(myspot[0]-1,myspot[1]+1)
+		myspotlist[5]=(myspot[0],myspot[1]+1)
+		myspotlist[3]=(myspot[0]+1,myspot[1]+1)
+		return myspotlist
+	def genmyspotlist1(myspot): #0-1 biased. need to bias according to start
+		myspot=list(myspot)
+		myspotlist=[None]*8
+		myspotlist[2]=(myspot[0]-1,myspot[1]-1)
+		myspotlist[0]=(myspot[0],myspot[1]-1)
+		myspotlist[1]=(myspot[0]+1,myspot[1]-1)
+		myspotlist[3]=(myspot[0]-1,myspot[1])
+		myspotlist[4]=(myspot[0]+1,myspot[1])
+		myspotlist[5]=(myspot[0]-1,myspot[1]+1)
+		myspotlist[7]=(myspot[0],myspot[1]+1)
+		myspotlist[6]=(myspot[0]+1,myspot[1]+1)
+		return myspotlist
+	def genmyspotlist6(myspot): #0+1 biased. need to bias according to start
+		myspot=list(myspot)
+		myspotlist=[None]*8
+		myspotlist[5]=(myspot[0]-1,myspot[1]-1)
+		myspotlist[7]=(myspot[0],myspot[1]-1)
+		myspotlist[6]=(myspot[0]+1,myspot[1]-1)
+		myspotlist[4]=(myspot[0]-1,myspot[1])
+		myspotlist[3]=(myspot[0]+1,myspot[1])
+		myspotlist[2]=(myspot[0]-1,myspot[1]+1)
+		myspotlist[0]=(myspot[0],myspot[1]+1)
+		myspotlist[1]=(myspot[0]+1,myspot[1]+1)
+		return myspotlist
+	def genmyspotlist4(myspot): #+10 biased. need to bias according to start
+		myspot=list(myspot)
+		myspotlist=[None]*8
+		myspotlist[5]=(myspot[0]-1,myspot[1]-1)
+		myspotlist[3]=(myspot[0],myspot[1]-1)
+		myspotlist[1]=(myspot[0]+1,myspot[1]-1)
+		myspotlist[7]=(myspot[0]-1,myspot[1])
+		myspotlist[0]=(myspot[0]+1,myspot[1])
+		myspotlist[6]=(myspot[0]-1,myspot[1]+1)
+		myspotlist[4]=(myspot[0],myspot[1]+1)
+		myspotlist[2]=(myspot[0]+1,myspot[1]+1)
+		return myspotlist
+	def genmyspotlist3(myspot): #-10 biased. need to bias according to start
+		myspot=list(myspot)
+		myspotlist=[None]*8
+		myspotlist[2]=(myspot[0]-1,myspot[1]-1)
+		myspotlist[4]=(myspot[0],myspot[1]-1)
+		myspotlist[6]=(myspot[0]+1,myspot[1]-1)
+		myspotlist[0]=(myspot[0]-1,myspot[1])
+		myspotlist[7]=(myspot[0]+1,myspot[1])
+		myspotlist[1]=(myspot[0]-1,myspot[1]+1)
+		myspotlist[3]=(myspot[0],myspot[1]+1)
+		myspotlist[5]=(myspot[0]+1,myspot[1]+1)
+		return myspotlist
+	#dview['genmyspotlist']=genmyspotlist
+	def createcenter(layer,midspot):
+		midspot=list(midspot)
+		layerspots=[None]*(8*(layer-1))
+		def varyx(mult=1):
+			thissection=[]
+			for x in range(-1*(layer-1),layer+1):
+				thissection.append(tuple([midspot[0]+mult*x,midspot[1]+mult*layer]))
+			return thissection
+		def varyy(mult=1):
+			thissection=[]
+			for y in range(-1*(layer-1),layer+1):
+				thissection.append(tuple([midspot[0]+mult*layer,midspot[1]+-1*mult*y]))
+			return thissection
+		layerspots[0:2*(layer-1)-1]=varyx()
+		layerspots[2*(layer-1):4*(layer-1)-1]=varyy()
+		layerspots[4*(layer-1):6*(layer-1)-1]=varyx(mult=-1)
+		layerspots[6*(layer-1):8*(layer-1)-1]=varyy(mult=-1)
+		return layerspots
+	def nearestzero(myspot,map):
+		myspotlist=genmyspotlist(myspot)
+		listofbadspots=[]
+		for i in range(0,8):
+			if len(map) in myspotlist[i] or -1 in myspotlist[i]:
+				listofbadspots.append(myspotlist[i])
+		for i in listofbadspots:
+			myspotlist.remove(i)
+		x,y=numpy.where(map==0)
+		zerospots=zip(x,y)
+		if len(zerospots)==0:
+			print 'could not find any zeros, will stay put'
+			return myspot
+		zerodists=[None]*len(zerospots)
+		for i in range(0,len(zerospots)):
+			zerodists[i]=sqrt((myspot[0]-zerospots[i][0])**2+(myspot[1]-\
+				   zerospots[i][1])**2)
+		closestzero=zerospots[zerodists.index(min(zerodists))]
+		distlist=[None]*len(myspotlist)
+		for i in range(0,len(myspotlist)):
+			distlist[i]=sqrt((closestzero[0]-myspotlist[i][0])**2+\
+					 (closestzero[1]-myspotlist[i][1])**2)
+		return tuple(myspotlist[distlist.index(min(distlist))])
+	dview['nearestzero']=nearestzero
+	background=numpy.zeros((size,size))
+	spots=[None]*numworkers
+	def updatemap():
+		for spot in spots:
+			background[spot[0],spot[1]]=background[spot[0],spot[1]]+1;
+
+	#define different search methods and push to engines
+	def edgeseek(center,myspot,map,nope=False):
+		if type(myspot[0])==tuple:
+			myspot=myspot[0]
+		oktogo=0
+		repeats=0
+		myspotlist=genmyspotlist(myspot)
+		if nope:
+			myspotlist.remove(nope)
+		listofbadspots=[]
+		for i in range(0,len(myspotlist)):
+			if len(map) in myspotlist[i] or -1 in myspotlist[i] or map[\
+						 myspotlist[i][0],myspotlist[i][1]]!=0:
+				listofbadspots.append(myspotlist[i])
+		for i in listofbadspots:
+			myspotlist.remove(i)
+		if len(myspotlist)==0:
+			return nearestzero(myspot,map)
+		distlist=[None]*len(myspotlist)
+		for i in range(len(distlist)):
+			distlist[i]=sqrt((center[0]-myspotlist[i][0])**2+(center[1]-\
+						myspotlist[i][1])**2)
+		return tuple(myspotlist[distlist.index(max(distlist))])
+	dview['edgeseek']=edgeseek
+	def centerseek(center,myspot,map,nope=False):
+		if type(myspot[0])==tuple:
+			myspot=myspot[0]
+		oktogo=0
+		repeats=0
+		#for now, redefining center to be center of map
+	
+		myspotlist=genmyspotlist(myspot)
+		if nope:
+			myspotlist.remove(nope)
+		listofbadspots=[]
+		for i in range(0,len(myspotlist)):
+			if len(map) in myspotlist[i] or -1 in myspotlist[i] or map[\
+						 myspotlist[i][0],myspotlist[i][1]]!=0:
+				listofbadspots.append(myspotlist[i])
+		for i in listofbadspots:
+			myspotlist.remove(i)
+		if len(myspotlist)==0:
+			return nearestzero(myspot,map)
+		distlist=[None]*len(myspotlist)
+		for i in range(0,len(distlist)):
+			distlist[i]=sqrt((center[0]-myspotlist[i][0])**2+(center[1]-\
+						myspotlist[i][1])**2)
+		return tuple(myspotlist[distlist.index(min(distlist))])
+	#only difference between the 2 algorithms is min v max in the last line
+	dview["centerseek"]=centerseek
+
+	#initialize map w/ clustered drones
+	midspot=tuple([size/2,size/2])
+	midspots=genmyspotlist(midspot)
+	background[midspot[0],midspot[1]]=1 #saying center of release is known
+	if numworkers<=8:
+		spots=midspots[:numworkers]
+		for i in range(numworkers):
+			exec 'alignbias='+dicname+'['+str(i)+']' in locals(), globals()
+			exec 'c[c.ids[i]]["genmyspotlist"]=genmyspotlist'+str(alignbias) in locals(), globals()
+	else:
+		for layer in range(2,(int(sqrt(numworkers))+1)/2+2):
+			thislayerend=min(8*(layer-1),numworkers)
+			thislayerstart=8*(layer-2)
+			spots[thislayerstart:thislayerend]=createcenter(layer,midspot)[:thislayerend-thislayerstart]
+	for worker in spots:
+		print "worker at "+str(worker)
+	updatemap()
+	oldspots=[]
+	oldspots.append(tuple(spots))
+	iteration=1
+
+	#start the search
+	if clearprompt=='y':
+		os.system('clear')
+	print 'starting the search'
+	print 'iteration '+str(iteration)
+	print background
+
+	while 0 in background:
+		dview=c[:]
+		if iteration==1:
+			print 'starting at '+str(spots)
+		else:
+			print str(oldspots[iteration-2])+' >>> '+str(spots)
+		center=[None,None]
+		center[0]=sum([x for x,y in spots])/len(spots)
+		center[1]=sum([y for x,y in spots])/len(spots)
+		starttime=time.time()
+		dview.scatter('myspot',spots)
+		dview['center']=center
+		if algorithm=='centerseek':
+			dview['center']=midspot
+		dview['map']=background
+		dview.execute('newspot='+algorithm+'(center,myspot,map)')
+		for i in c.ids: #or use dview.gather, but duplicates
+			if not c[i]['newspot'] in spots:
+				spots[c.ids.index(i)]=c[i]['newspot']
+			else:
+				#print 'possible problem with '+str(i)
+				#if crashtest==3:
+				#	sys.exit('drone '+str(i)+' stalled')
+				c[i].execute('newspot='+algorithm+'(center,myspot,map,newspot)')
+				spots[c.ids.index(i)]=c[i]['newspot']
+				#if spots[i]==oldspots[iteration-1][i]:
+				#	crashtest=crashtest+1
+		updatemap()
+		oldspots.append(tuple(spots))
+		iteration=iteration+1
+		if clearprompt=='y':
+			os.system('clear')
+		print 'iteration '+str(iteration)
+		print background
+		print 'percent done: '+str(float((background>0).sum())/(size**2)*100)+'%'
+
+	#once done, print the final report
+	print 'final report: '
+	print "moves wasted: (doesn't account for necessary moves) "+str(-size**2+numworkers*iteration+1)
+	print 'workers: '+str(numworkers)
+	print 'number of squares: '+str(size**2)
+	print 'extra iterations: '+str(iteration-ceil(size**2/numworkers))
+	print 'percent error in terms of iterations: '+str((iteration-\
+					ceil(size**2/numworkers\
+					))/iteration*100)+'%'
+
+if __name__=='__main__':
+	parasearch()

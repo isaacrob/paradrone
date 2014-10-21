@@ -1,0 +1,1 @@
+detectMultiScale(img,5,4,(cv2.cv.CV_HAAR_DO_CANNY_PRUNING),(60,60))
