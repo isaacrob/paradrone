@@ -1,4 +1,4 @@
-import cv2
+import cv2, copy
 import numpy as np
 facefinder=cv2.CascadeClassifier("/usr/local/Cellar/opencv/2.4.9/share/OpenCV/haarcascades/haarcascade_frontalface_alt2.xml")
 eyefinder=cv2.CascadeClassifier("/usr/local/Cellar/opencv/2.4.9/share/OpenCV/haarcascades/haarcascade_eye.xml")
@@ -23,7 +23,7 @@ while not raw_input("find and align face? y/n ")=='n':
 			print "finding facial features..."
 			for (x,y,h,w) in biggestface:
 				thisface=img[x:(x+w),y:(y+h),:]
-				#thisfacecopy=img[x:(x+w),y:(y+h),:]
+				cleanface=copy.deepcopy(thisface)
 			cv2.imshow("thisface",thisface)
 			eyes=eyefinder.detectMultiScale(thisface,1.1,30,1)
 			noses=nosefinder.detectMultiScale(thisface,1.1,20,1)
@@ -46,14 +46,18 @@ while not raw_input("find and align face? y/n ")=='n':
 				#print biggestnose
 				cv2.imshow("thisface features",thisface)
 				eye1mid=(finaleyes[0][0]+finaleyes[0][3]/2,finaleyes[0][1]+finaleyes[0][2]/2)
-				eye2mid=(finaleyes[1][0]+finaleyes[1][3]/2,finaleyes[1][1]+finaleyes[1][2]/2)
+				try:
+					eye2mid=(finaleyes[1][0]+finaleyes[1][3]/2,finaleyes[1][1]+finaleyes[1][2]/2)
+				except:
+					print "something went wrong with the format of eyes, skipping to next iteration"
+					continue
 				if eye1mid[0]<eye2mid[0]:
 					lefteye=eye1mid
 					righteye=eye2mid
 				else:
 					lefteye=eye2mid
 					righteye=eye1mid
-				borderoffset=5.0/6.0
+				borderoffset=9.0/12.0
 				midborderoffset=3
 				eyetriangle=[righteye[0]-lefteye[0],righteye[1]-lefteye[1]]
 				topbordermid=[lefteye[0]+eyetriangle[0]/2+eyetriangle[1]/midborderoffset,lefteye[1]+eyetriangle[1]/2-eyetriangle[0]/midborderoffset]
@@ -85,16 +89,19 @@ while not raw_input("find and align face? y/n ")=='n':
 					print border[0]
 					bordercenteroffset=[border[0][0]-facecenter[0],border[0][1]-facecenter[1]]
 					print bordercenteroffset
-					borderoffsetafterrotation=[bordercenteroffset[0]*np.cos(rotationangle)+bordercenteroffset[1]*np.sin(rotationangle),bordercenteroffset[0]*np.sin(rotationangle)-bordercenteroffset[1]*np.cos(rotationangle)]
+					borderoffsetafterrotation=[bordercenteroffset[0]*np.cos(rotationangle)+bordercenteroffset[1]*np.sin(rotationangle),bordercenteroffset[0]*np.sin(rotationangle)-bordercenteroffset[1]*np.cos(rotationangle)-borderlength]
 					print borderoffsetafterrotation
 					borderafterrotation=(int(borderoffsetafterrotation[0]+facecenter[0]),int(borderoffsetafterrotation[1]+facecenter[1]))
 					print borderafterrotation
 					finalface=cv2.warpAffine(thisface,rotationmat,thisface.shape[:2],flags=cv2.INTER_LINEAR)
-					finalcroppedface=finalface[borderafterrotation[0]:borderafterrotation[0]+borderlength,borderafterrotation[1]-borderlength:borderafterrotation[1],:]
-					cv2.circle(finalface,borderafterrotation,5,(0,255,0),-1)
+					finalcroppedface=finalface[borderafterrotation[1]:borderlength+borderafterrotation[1],borderafterrotation[0]:borderafterrotation[0]+borderlength]
+					cv2.circle(finalface,borderafterrotation,3,(0,255,0),-1)
+					#cv2.circle(finalface,(borderafterrotation[0],borderafterrotation[1]-borderlength),3,(0,255,0),-1)
 					cv2.circle(finalface,facecenter,4,(0,255,255),-1)
 					cv2.imshow("rotated",finalface)
 					cv2.imshow("final cropped face",finalcroppedface)
+					cleanface=cv2.warpAffine(cleanface,rotationmat,thisface.shape[:2],flags=cv2.INTER_LINEAR)[borderafterrotation[1]:borderlength+borderafterrotation[1],borderafterrotation[0]:borderafterrotation[0]+borderlength]
+					cv2.imshow("clean face",cleanface)
 			elif len(eyes)>1:
 				print "could not find a nose. working with eyes only"
 				for (x,y,h,w) in eyes:
